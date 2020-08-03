@@ -1,0 +1,3 @@
+#!/bin/bash
+/bin/rm -f scipass-centos6.sif
+singularity build scipass-centos6.sif Singularity-CentOS6

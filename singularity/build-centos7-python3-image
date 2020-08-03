@@ -1,0 +1,7 @@
+#!/bin/bash
+export SINGULARITY_LOCALCACHEDIR=`pwd`/tmp
+export SINGULARITY_TMPDIR=`pwd`/tmp
+mkdir -p $SINGULARITY_TMPDIR
+
+/bin/rm -f scipass-centos7-python3.sif
+singularity build scipass-centos7-python3.sif Singularity-CentOS7-Python3

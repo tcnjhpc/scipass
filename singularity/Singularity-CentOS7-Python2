@@ -1,0 +1,127 @@
+Bootstrap: yum
+OSVersion: 7
+MirrorURL: http://mirror.centos.org/centos-%{OSVERSION}/%{OSVERSION}/os/$basearch/
+Include: yum wget
+
+%post
+###############################################################################################
+## Rebuild RPM package database
+rm /var/lib/rpm/Name
+rpm --rebuilddb
+
+###############################################################################################
+## Install base CentOS and packages we know will be needed
+yum -y install epel-release
+yum -y install vi python-pip python-pbr
+yum -y install perl-Test-Simple perl-XML-XPath perl-Test-Pod perl-Test-Pod-Coverage mod_perl httpd-devel ImageMagick-perl mod_perl-devel perl-Devel-Cover rpm-build
+yum -y install python-lxml python-ipaddr perl-Term-ReadLine-Gnu
+
+###############################################################################################
+## Install libraries needed by PyCharm
+#yum -y install libXext libXrender libXtst freetype
+#cd /usr/local
+#wget https://download-cf.jetbrains.com/python/pycharm-professional-2018.3.2.tar.gz
+#tar xzvf pycharm-professional-2018.3.2.tar.gz
+#rm -f pycharm-professional-2018.3.2.tar.g
+#cd /usr/local/bin
+#ln -s ../pycharm-professional-2018.3.2/bin/pycharm.sh pycharm
+
+###############################################################################################
+## Clean up RPM package database
+yum clean all
+/bin/rm -r /var/cache/yum/*
+yum makecache fast
+yum -y update
+
+###############################################################################################
+## Install an non-interactive CPAN module installer ... CPANmin
+cd /tmp
+wget -O - http://cpanmin.us | perl - --self-upgrade
+cpanm Apache::TestMM
+
+###############################################################################################
+## Make a build directory and pull down some Git sources for SciPass
+mkdir /software
+mkdir /software/rpms
+cd /software
+git clone https://github.com/GlobalNOC/GRNOC-Config.git
+git clone https://github.com/GlobalNOC/GRNOC-WebService.git
+git clone https://github.com/GlobalNOC/GRNOC-WebService-Client.git
+git clone https://github.com/GlobalNOC/SciPass.git
+
+###############################################################################################
+## Build and install GRNOC-Config RPM
+cd /software/GRNOC-Config
+perl Makefile.PL
+make dist
+# Fudge the build since we don't have "make rpm" available
+tar xzvf GRNOC-Config-1.0.9.tar.gz 
+cp perl-GRNOC-Config.spec GRNOC-Config-1.0.9/.
+tar czvf GRNOC-Config-1.0.9.tar.gz GRNOC-Config-1.0.9
+/bin/rm -r GRNOC-Config-1.0.9
+# Build the RPM and install it
+rpmbuild -ta GRNOC-Config-1.0.9.tar.gz
+rpm -ihv ~/rpmbuild/RPMS/noarch/perl-GRNOC-Config-1.0.9-1.el7.noarch.rpm
+
+###############################################################################################
+## Build and install GRNOC-WebService RPM
+cd /software/GRNOC-WebService
+cp perl-GRNOC-WebService.spec perl-GRNOC-WebService.spec.bak
+# Remove build dependency on GRNOC-WebService-Client which also requires this module ... circular dependency
+sed -i '/perl-GRNOC-WebService-Client/d' perl-GRNOC-WebService.spec
+perl Makefile.PL
+make rpm
+cp perl-GRNOC-WebService.spec.bak perl-GRNOC-WebService.spec
+# Use --nodeps since it has a circular depenency with GRNOC-WebService-Client below
+rpm -ihv --nodeps ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-1.*.el7.noarch.rpm
+
+###############################################################################################
+## Build and install GRNOC-WebService-Client RPM
+cd /software/GRNOC-WebService-Client
+perl Makefile.PL
+make rpm
+yum -y install ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-Client-1.*.el7.noarch.rpm
+
+###############################################################################################
+## Rebuild and reinstall GRNOC-WebService RPM to make sure all dependencies are met
+cd /software/GRNOC-WebService
+make distclean
+/bin/rm ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-1.*.el7.noarch.rpm
+perl Makefile.PL
+make rpm
+yum -y reinstall ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-1.*.el7.noarch.rpm
+
+###############################################################################################
+## Build and reinstall SciPass RPM to make sure all dependencies are met
+cd /software/SciPass
+cp SciPass.spec SciPass.spec.orig
+# Remove python modules that we'll need to build using pip instead of installing via RPM
+sed -i '/python-ryu/d' SciPass.spec
+sed -i '/python-WebOb/d' SciPass.spec
+sed -i '/python-oslo.config/d' SciPass.spec
+sed -i '/python-six/d' SciPass.spec
+sed -i '/python-netaddr/d' SciPass.spec
+sed -i '/python-stevedore/d' SciPass.spec
+# The two "pip install" commands should install all the required modules we just removed from the spec file above
+pip install 'stevedore<3.0'
+pip install 'oslo.config==6.10.0'
+pip install 'ryu==4.32'
+
+make rpm
+yum -y install ~/rpmbuild/RPMS/x86_64/SciPass-*.x86_64.rpm
+
+###############################################################################################
+## Archive all the RPMs to /software/rpms so they are preserved in the Singularity image
+cp ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-Client-1.*.el7.noarch.rpm /software/rpms/.
+cp ~/rpmbuild/RPMS/noarch/perl-GRNOC-WebService-1.*.el7.noarch.rpm /software/rpms/.
+cp ~/rpmbuild/RPMS/x86_64/SciPass-*.x86_64.rpm /software/rpms/.
+
+###############################################################################################
+# Clean up RPM package database
+rpm --rebuilddb
+yum clean all
+/bin/rm -r /var/cache/yum/*
+yum makecache fast
+
+%startscript
+ryu-manager /usr/lib/python2.7/site-packages/SciPass/Ryu.py >/var/log/scipass/scipass.log 2>&1 &

@@ -1,0 +1,19 @@
+Bootstrap: yum
+OSVersion: 6
+MirrorURL: http://mirror.centos.org/centos-%{OSVERSION}/%{OSVERSION}/os/$basearch/
+Include: yum wget
+
+%post
+rm /var/lib/rpm/Name
+rpm --rebuilddb
+
+yum -y groupinstall Base
+yum -y install epel-release
+yum -y install vi python-pip python-pbr
+
+mkdir /software
+cd /software
+wget https://docs.globalnoc.iu.edu/sdn/scipass/releases/scipass-1.0.4.tar.gz
+tar xzf scipass-1.0.4.tar.gz
+cd SciPass-1.0.4
+yum -y install *.rpm
